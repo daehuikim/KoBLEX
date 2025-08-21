@@ -51,10 +51,7 @@ However, there are several important changes compared to the original Korean ver
    - The Korean statutes are provided at the **paragraph (항)** level.  
    - The English statutes are only available at the **article (조)** level.
 
-
-## License
-KoBLEX is licensed under [the Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/). 
-
+   
 ## Citation
 ``
 To be updated
