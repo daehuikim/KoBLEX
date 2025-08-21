@@ -1,0 +1,39 @@
+You are given a legal question scenario, its proposed answer, and a set of legal context provisions.
+
+Your task is to evaluate the following:
+
+1. Scenario Consistent: Determine whether the background_scenario + question_scenario could have been composed using only the explicit legal content given in context. In other words, assess whether the question is logically and legally consistent with the context without requiring outside legal knowledge.
+
+2. Correct: Evaluate whether the proposed answer is legally correct based on the background_scenario, question_scenario, and the context.
+
+3. Derivable: Assess whether the proposed answer can be logically and completely derived from the provided context alone, without requiring any unstated assumptions.
+
+Use Korean for the justifications.
+
+---
+
+Input:
+
+background_scenario:
+{background_scenario}
+
+question_scenario:
+{question_scenario}
+
+answer_scenario:
+{answer_scenario}
+
+context:
+{formatted list of legal articles with content}
+
+---
+
+Output Format:
+Scenario Consistent: (Yes / No)
+Scenario Justification: (Can the question be composed based solely on the given legal context? Explain with reference to the content of the legal provisions.)
+
+Correct: (Yes / No)
+Explanation: (Is the proposed answer legally appropriate in light of the scenario and the legal provisions? Provide your reasoning.)
+
+Derivable: (Yes / No)
+Justification: (Can the answer be fully derived from the legal provisions alone? Explain based on the wording and logic of the articles.)

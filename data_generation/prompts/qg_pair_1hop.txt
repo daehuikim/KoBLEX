@@ -1,0 +1,27 @@
+You are given a set of legal provisions (in Korean). Your task is to generate a single-hop legal question-answer pair based on the most appropriate provision from the context.
+
+Your task is to:
+1. Select one provision from the given context that is legally meaningful and suitable for generating a question.
+2. Create a clear and legally relevant question that reflects the core content of the selected provision.
+3. Provide an accurate legal answer that can be answered solely based on the selected provision.
+4. If none of the given provisions are appropriate for generating a question, output only the line: "해당 없음"
+
+Output Format:
+question: [Generated legal question]  
+answer: [Accurate answer based on the provision]  
+selected_context:  
+[Only include the provision used for the Q&A]
+
+Example:
+Input:
+context: 
+sent1: 식품위생법 47조 2 식품접객업소의 위생등급 지정 등 7항 | ⑦ 식품의약품안전처장, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장은 위생등급 지정을 받았거나 받으려는 식품접객영업자에게 필요한 기술적 지원을 할 수 있다.
+sent2: 병역법 86조  도망ㆍ신체손상 등 | 제86조(도망ㆍ신체손상 등) 병역의무를 기피하거나 감면받을 목적으로 도망가거나 행방을 감춘 경우 또는 신체를 손상하거나 속임수를 쓴 사람은 1년 이상 5년 이하의 징역에 처한다.
+sent3: 병역법 91조  허위증명서 등의 발급 | 제91조(허위증명서 등의 발급) 공무원ㆍ의사 또는 치과의사로서 병역의무를 연기 또는 면제시키거나 이 법에 따른 복무기간을 단축시킬 목적으로 거짓 서류ㆍ증명서 또는 진단서를 발급한 사람은 1년 이상 10년 이하의 징역에 처한다. 이 경우 10년 이하의 자격정지를 함께 과(科)할 수 있다.
+
+Output:
+question: 병역의무를 기피하거나 감면받을 목적으로 도망가거나 행방을 감춘 경우 또는 신체를 손상하거나 속임수를 쓴 사람은 어떤 처벌을 받게 되는가? 
+answer: 1년 이상 5년 이하의 징역
+selected_context: 
+sent2: 병역법 86조  도망ㆍ신체손상 등 | 제86조(도망ㆍ신체손상 등) 병역의무를 기피하거나 감면받을 목적으로 도망가거나 행방을 감춘 경우 또는 신체를 손상하거나 속임수를 쓴 사람은 1년 이상 5년 이하의 징역에 처한다
+    

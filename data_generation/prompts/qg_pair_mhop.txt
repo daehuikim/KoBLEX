@@ -1,0 +1,44 @@
+You are given:
+
+An existing Q&A pair generated from one or more legal provisions.
+
+1. The current_context, which contains the provision(s) used for the existing Q&A.
+2. The remain_context, which contains additional legal provisions not yet used.
+3. Your task is to expand the original question into a (k+1)-hop question that logically incorporates one new provision from remain_context.
+
+Your task is to:
+1. Select one provision from remain_context that logically connects to the existing question or answer.
+2. Generate an expanded (k+1)-hop legal question that requires both current_context and the newly selected provision to be answered.
+3. Provide a new answer that integrates both contexts.
+4. Output the newly selected provision as selected_context.
+5. If none of the remaining provisions are appropriate for expansion, output only the line: "해당 없음"
+
+Constraints
+1. The new question must logically build upon the existing question.
+2. The answer must not be answerable using only one of the contexts (neither current_context nor the selected_context alone).
+3. The question must be in Korean, concise, and naturally phrased.
+
+Output Format:
+question: [Expanded k+1-hop legal question]
+answer: [New answer that depends on both current_context and selected_context]
+selected_context:
+[One newly selected sentence from remain_context]
+
+
+Example:
+Input:
+question: 2인 이상이 공동하여 죄를 범한 경우, 각자는 어떤 처벌을 받게 되는가?
+answer: 각자를 그 죄의 정범으로 처벌한다.
+current_context:
+sent1: 형법 30조  공동정범 | 제30조(공동정범) 2인 이상이 공동하여 죄를 범한 때에는 각자를 그 죄의 정범으로 처벌한다.
+remain_context:
+sent1: 식품위생법 47조 2 식품접객업소의 위생등급 지정 등 7항 | ⑦ 식품의약품안전처장, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장은 위생등급 지정을 받았거나 받으려는 식품접객영업자에게 필요한 기술적 지원을 할 수 있다.
+sent2: 병역법 91조  허위증명서 등의 발급 | 제91조(허위증명서 등의 발급) 공무원ㆍ의사 또는 치과의사로서 병역의무를 연기 또는 면제시키거나 이 법에 따른 복무기간을 단축시킬 목적으로 거짓 서류ㆍ증명서 또는 진단서를 발급한 사람은 1년 이상 10년 이하의 징역에 처한다. 이 경우 10년 이하의 자격정지를 함께 과(科)할 수 있다.
+sent3: 형법 257조  상해, 존속상해 1항 | ①사람의 신체를 상해한 자는 7년 이하의 징역, 10년 이하의 자격정지 또는 1천만원 이하의 벌금에 처한다. <개정 1995.12.29>
+
+
+Output:
+question: 2인 이상이 공동하여 사람의 신체를 상해한 경우, 각자는 어떤 처벌을 받게 되는가?
+answer: 2인 각자는 그 죄의 정범으로서 7년 이하의 징역, 10년 이하의 자격정지 또는 1천만원 이하의 벌금에 처한다.
+selected_context:
+sent3: 형법 257조  상해, 존속상해 1항 | ①사람의 신체를 상해한 자는 7년 이하의 징역, 10년 이하의 자격정지 또는 1천만원 이하의 벌금에 처한다. <개정 1995.12.29>

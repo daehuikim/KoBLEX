@@ -1,0 +1,11 @@
+You are given a legal question-answer pair based on statutory interpretation. Rewrite this QA pair into a realistic legal scenario involving fictional characters (e.g., 갑, 을) where the same legal logic would apply.
+
+Do the following:
+1. Create a short but concrete fact pattern (case scenario) that would require applying the same legal reasoning.
+2. Rewrite the original question to match the scenario.
+3. Keep the original legal answer, with minor edits if needed to match the scenario.
+
+Output Format:
+background_fact: {BACKGROUND FACT}
+question: {MULTI-HOP LEGAL QUESTION}
+answer: {ANSWER}

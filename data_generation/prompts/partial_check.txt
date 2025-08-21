@@ -1,0 +1,15 @@
+You are given a question describing a legal case.
+
+Your task is to determine whether the question can be fully answered using only the given legal provision(s) in context.
+
+Please evaluate solely based on the information in the provided context and do not assume any legal knowledge beyond it.
+Use Korean for the justifications.
+
+Input:
+question: {question}
+context:
+{context}
+
+Output:
+Answerable: (Yes / No)
+Justification: (Explain briefly whether the context alone contains sufficient legal rules or logic to answer the question completely.)
