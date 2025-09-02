@@ -52,6 +52,40 @@ However, there are several important changes compared to the original Korean ver
    - The English statutes are only available at the **article (조)** level.
 
    
+## Experiments Overview
+
+This repository includes comprehensive experiments on **Retrieval-Augmented Reasoning for Legal Multi-hop Open Question Answering**. The experiments evaluate various state-of-the-art RAG methods adapted for legal domain requirements, comparing them against our proposed **Parser** methodology.
+
+### Key Research Focus
+- **Multi-hop Legal Reasoning**: Complex legal questions requiring information from multiple statutory provisions
+- **Retrieval-Augmented Generation**: Combining document retrieval with generative reasoning
+- **Legal Domain Adaptation**: Tailoring general RAG methods for legal text characteristics
+
+### Experimental Methods
+
+**Proposed Method**: 
+- **Parser**: Novel 3-stage retrieval pipeline with parametric provision generation for enhanced legal statute search accuracy
+
+**Baseline Methods**:
+- **Standard Prompting**: Direct question answering without retrieval augmentation
+- **Chain-of-Thought**: Step-by-step reasoning without retrieval
+- **Self-Ask**: Question decomposition into sub-questions with step-by-step reasoning
+- **IRCoT**: Interleaving retrieval with chain-of-thought reasoning
+- **FLARE**: Forward-looking active retrieval for anticipatory information gathering
+- **ProbTree**: Hierarchical question decomposition with probabilistic reasoning
+- **BeamAggr**: Beam search with multiple strategies for information aggregation
+
+### Evaluation Framework
+- **LF-Eval**: We propose a novel Legal Fidelity Evaluation using G-Eval-based assessment
+- **Multi-metric Evaluation**: Token-level F1, retrieval precision/recall, and legal accuracy scoring
+- **Comprehensive Benchmarking**: Results across multiple model backends (GPT-4o, Qwen, Exaone)
+
+For detailed experimental setup and implementation, see [experiments README](experiments/README.md).
+
+## Results Overview
+
+The `results/` directory contains generated result files from various methods evaluated on KoBLEX.
+
 ## Citation
 ``
 To be updated

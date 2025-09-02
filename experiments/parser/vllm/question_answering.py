@@ -66,7 +66,7 @@ def create_prompts(data_list: List[Dict[str, Any]]) -> List[str]:
     prompts = []
     
     for item in data_list:
-        question = item['question']
+        question = item['background'] + item['question']
         provisions = item.get('selected_provisions', [])
         prompt = INSTRUCTION_PROMPT.substitute(
             question=question,
@@ -185,6 +185,7 @@ def main():
     with open(args.output, 'w', encoding='utf-8') as fout:
         for item, provisions, answer in zip(data, [item.get('selected_provisions', []) for item in data], answers):
             record = {
+                "background": item['background'],
                 "question": item['question'],
                 "answer": answer,
                 "provisions": provisions

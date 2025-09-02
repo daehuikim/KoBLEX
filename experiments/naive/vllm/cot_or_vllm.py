@@ -242,7 +242,7 @@ def main():
         for entry, prediction, combi in zip(data_list, results, combinations):
             record = {
                 "question": entry['background'] + entry['question'],
-                "answers": [{"answer": prediction[0].split("Answer:")[-1].strip(), "logp": prediction[1], "comb": combi}]
+                "answer": prediction[0].split("Answer:")[-1].strip()
             }
             fw.write(json.dumps(record, ensure_ascii=False) + "\n")
     

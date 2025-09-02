@@ -224,7 +224,7 @@ def main():
         
         record = {
             'question': question,
-            'answers': [{'answer': ans, 'logp': 0, 'comb': comb}],
+            'answer': ans,
             'full_trace': trace.split("<Query>")[-1].strip() if "<Query>" in trace else trace
         }
         results.append(record)

@@ -184,8 +184,8 @@ async def main():
     # Write results
     print(f"Saving results to {args.output}")
     with open(args.output, 'w', encoding='utf-8') as fout:
-        for q, subs, sel in zip(questions, sub_queries, selections):
-            out = {"question": q, "parametric_provisions": subs, "selected_provisions": sel}
+        for bg, q, subs, sel in zip(backgrounds, questions, sub_queries, selections):
+            out = {"background":bg, "question":q, "parametric_provisions": subs, "selected_provisions": sel}
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
     
     print(f"Successfully processed {len(data)} records")

@@ -172,14 +172,14 @@ def extract_predictions(data_list: List[Dict], mode: str = "nhop") -> tuple:
     combination_list = []
     
     for item in data_list:
-        if mode == "naive":
-            temp_answer = item['answers']
-            answer_list.append(temp_answer)
-            combination_list.append([])
+        temp_answer = item['answer']
+        answer_list.append(temp_answer.split("<\think>")[0][:800] if len(temp_answer) > 0 else "")
+        
+        # Only append to combination_list if 'provisions' key exists
+        if 'provisions' in item:
+            combination_list.append(item['provisions'])
         else:
-            temp_answer = item['answers'][0]['answer']
-            answer_list.append(temp_answer.split("<\think>")[0][:800] if len(temp_answer) > 0 else "")
-            combination_list.append(item['answers'][0]['comb'])
+            combination_list.append([])  # Empty list for items without provisions
     
     return answer_list, combination_list
 
@@ -304,9 +304,15 @@ def main():
         results['token_f1'] = np.mean(f1_scores)
     
     if args.eval_type in ['all', 'retrieval']:
-        print("Evaluating retrieval performance...")
-        retrieval_results = evaluate_retrieval(combination_list, gold_context_combinations)
-        results['retrieval'] = retrieval_results
+        # Check if combination_list has any non-empty provisions
+        has_provisions = any(len(combo) > 0 for combo in combination_list)
+        
+        if has_provisions:
+            print("Evaluating retrieval performance...")
+            retrieval_results = evaluate_retrieval(combination_list, gold_context_combinations)
+            results['retrieval'] = retrieval_results
+        else:
+            print("Skipping retrieval evaluation - no provisions found in predictions")
     
     if args.eval_type in ['all', 'legal_fidelity']:
         print("Evaluating legal fidelity...")

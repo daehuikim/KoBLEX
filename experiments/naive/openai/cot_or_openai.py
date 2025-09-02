@@ -151,7 +151,7 @@ async def main():
         for entry, answer in zip(data_list, answers):
             record = {
                 "question": entry['background'] + entry['question'],
-                "answers": [{"answer": answer}]
+                "answer": answer
             }
             fw.write(json.dumps(record, ensure_ascii=False) + "\n")
     
