@@ -1,0 +1,317 @@
+import json
+import os
+from string import Template
+import bm25s
+import numpy as np
+from sentence_transformers import CrossEncoder
+import torch
+import re,gc
+from vllm import LLM, SamplingParams
+from transformers import AutoTokenizer
+from string import Template
+
+os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
+
+system_prompt="""<SYSTEM>
+You are given a question, and a list of candidate passages with associated passage IDs.  
+Your task is to identify the most proper passage that directly support the answer to the question.  
+Please select only one ID among given candidate passages.
+
+**Important instructions:**   
+- Do not include other information except the passage ID in your answer.
+- Even if multiple passages seem relevant or none seem perfectly appropriate, you must select exactly one passage ID.
+- your answer should be following after "Answer:" without other explanations.
+"""
+
+instruction_prompt= Template("""<EXAMPLE>
+Background: 갑은 군에서 10년간 복무하다가 부득이하게 퇴역하였습니다. 군인연금법에 따라 갑은 퇴역 후 연금을 받을 수 있는 자격이 없다는 판정을 받았습니다. 갑에게는 가족이 남아 있으며, 갑이 군 복무 중 납부했던 기여금에 대한 반환과 가족의 유족 급여에 관한 문제가 제기되었습니다.
+Question: 군인이었던 사람이 낸 기여금은 어떻게 처리 되나요?
+Candidates:
+0: 군인연금법 30조  퇴역유족연금 2항② 퇴역유족연금의 금액은 군인 또는 군인이었던 사람이 받을 수 있는 퇴역연금액의 60퍼센트로 한다.
+1: 군인연금법 30조  퇴역유족연금 3항③ 제2항에도 불구하고 유족 중 제3조제2항 또는 제3항에 해당하는 사람(그 사람을 부양하고 있는 제3조제1항제4호가목에 따른 군인 또는 군인이었던 사람의 배우자를 포함한다)에게는 군인 또는 군인이었던 사람이 받을 수 있는 퇴역연금액의 70퍼센트를 지급한다.
+2: 군인연금법 43조  과납 또는 미납된 기여금의 처리제43조(과납 또는 미납된 기여금의 처리) 더 내거나 덜 낸 기여금은 대통령령으로 정하는 바에 따라 다음 번 기여금을 징수할 때에 가감할 수 있다.
+3: 군인연금법 39조  고의 등에 의한 급여의 제한 1항① 퇴직유족급여를 받을 수 있는 사람이 군인, 군인이었던 사람 또는 퇴직유족급여를 받고 있는 사람을 고의로 사망하게 한 경우에는 그 사람에 대한 퇴직유족급여를 지급하지 아니한다. 군인 또는 군인이었던 사람의 사망 전에 그 사람의 사망으로 인하여 퇴직유족급여를 받을 수 있는 사람이 자신과 같은 순위자 또는 앞선 순위자를 고의로 사망하게 한 경우에도 또한 같다.
+4: 군인연금법 42조  기여금 2항② 기여금은 기준소득월액의 7퍼센트로 한다. 이 경우 기준소득월액은 공무원 전체의 기준소득월액 평균액의 180퍼센트를 초과할 수 없다.
+5: 대기환경보전법 58조 4 저공해자동차 보급 기여금 2항② 기여금은 무공해자동차 충전시설의 설치ㆍ운영 등 저공해자동차 보급 활성화를 위한 사업에 사용되어야 한다.
+6: 군인연금법 12조  급여의 수급자에 대한 특례 1항① 군인 또는 군인이었던 사람이 사망한 경우에 급여를 받을 유족이 없을 때에는 대통령령으로 정하는 한도의 금액을 유족이 아닌 직계비속 또는 직계존속에게 지급하고, 직계비속 또는 직계존속도 없을 때에는 그 사망한 군인을 위하여 사용할 수 있다.
+7: 군인연금법 17조  미납금의 공제지급제17조(미납금의 공제지급) 군인, 군인이었던 사람 또는 제7조제2호에 따른 퇴직유족급여(이하 "퇴직유족급여"라 한다)를 지급받는 사람이 다음 각 호의 어느 하나에 해당하는 채무가 있을 때에는 이 법에 따른 급여에서 공제하고 지급할 수 있다. 다만, 연금인 급여에 대해서는 매월 지급되는 연금에서 2분의 1을 초과하여 공제하지 아니한다.
+8: 군인연금법 3조  정의 4항④ 군인 또는 군인이었던 사람의 사망 당시의 태아는 이 법에 따른 급여를 지급할 때에 이미 출생한 것으로 본다.
+9: 군인연금법 39조  고의 등에 의한 급여의 제한 3항③ 퇴직유족급여를 받을 수 있는 사람 중 군인이거나 군인이었던 사람에 대하여 양육책임이 있었던 사람이 이를 이행하지 아니하였던 경우에는 「군인 재해보상법」 제5조에 따른 군인재해보상심의회의 심의를 거쳐 양육책임을 이행하지 아니한 기간, 정도 등을 고려하여 대통령령으로 정하는 바에 따라 해당 급여의 전부 또는 일부를 지급하지 아니할 수 있다. <신설 2023.10.31>
+Answer: 0
+
+Background: 갑은 군에서 10년간 복무하다가 부득이하게 퇴역하였습니다. 군인연금법에 따라 갑은 퇴역 후 연금을 받을 수 있는 자격이 없다는 판정을 받았습니다. 갑에게는 가족이 남아 있으며, 갑이 군 복무 중 납부했던 기여금에 대한 반환과 가족의 유족 급여에 관한 문제가 제기되었습니다.
+Question: 군인의 유족 급여를 지급할 때 우선 순위는 어떻게 되나요?
+Candidates:
+0: 별정우체국법 24조 4 유족의 순위 등 1항① 급여를 받을 유족의 순위는 상속받는 순위에 따른다.
+1: 군인연금법 10조  유족의 우선순위제10조(유족의 우선순위) 급여를 받을 유족의 순위는 「민법」에 따른 상속의 순위에 따른다.
+2: 국가유공자 등 예우 및 지원에 관한 법률 68조  주택의 우선 공급 2항② 「주택법」 제54조에 따라 민영주택을 건설ㆍ공급하는 사업주체는 국가유공자와 그 유족 중 제47조에 따른 대부 대상자에게 그 민영주택 건설ㆍ공급량의 일부를 우선 공급할 수 있다. <신설 2017.10.31>
+3: 별정우체국법 24조 4 유족의 순위 등 2항② 유족 중에 동순위자(同順位者)가 2명 이상 있을 때에는 급여를 똑같이 나누어 지급하되, 지급 방법은 대통령령으로 정한다.
+4: 군인연금법 11조  같은 순위자의 경합제11조(같은 순위자의 경합) 유족 중 같은 순위자가 2명 이상 있을 때에는 급여를 똑같이 나누어 지급하되, 그 지급방법은 대통령령으로 정한다.
+5: 별정우체국법 2조  정의 3항③ 직원이거나 직원이었던 사람의 사망 당시의 태아는 이 법에 따른 급여를 지급할 때에는 이미 출생한 것으로 본다.
+6: 군인연금법 3조  정의 4항④ 군인 또는 군인이었던 사람의 사망 당시의 태아는 이 법에 따른 급여를 지급할 때에 이미 출생한 것으로 본다.
+7: 한부모가족지원법 12조 5 복지급여수급계좌 1항① 국가나 지방자치단체는 제12조에 따른 복지 급여를 받는 지원대상자의 신청이 있는 경우에는 복지 급여를 지원대상자 명의의 지정된 계좌(이하 "복지급여수급계좌"라 한다)로 입금하여야 한다. 다만, 정보통신장애나 그 밖에 대통령령으로 정하는 불가피한 사유로 복지급여수급계좌로 이체할 수 없을 때에는 현금 지급 등 대통령령으로 정하는 바에 따라 복지 급여를 지급할 수 있다.
+8: 군인연금법 20조  다른 법령에 따른 급여와의 조정 3항③ 동일인에게 퇴역연금과 상이연금을 지급할 사유가 발생한 경우에는 본인에게 유리한 급여를 하나만 선택하게 하여 지급한다.
+9: 국가유공자 등 예우 및 지원에 관한 법률 14조  생활조정수당 1항① 다음 각 호에 해당하는 사람에게는 대통령령으로 정하는 바에 따라 생활수준을 고려하여 생활조정수당을 지급할 수 있다. 1. 국가유공자 2. 국가유공자의 유족 중 보상금을 받는 사람 3. 국가유공자의 유족 중 보상금을 받는 사람이 없는 경우에는 제5조제1항 각 호의 순위에 따른 선순위자 1명
+Answer: 1
+
+Background: 갑은 폭행죄로 1심에서 징역 6개월을 선고받았다. 이에 피고인 갑과 검사 모두 항소하였다.
+Question: 피고인이 항소한 사건에서 원심보다 무거운 형을 선고할 수 있나요?
+Candidates:
+0: 군사법원법 437조  불이익변경의 금지제437조(불이익변경의 금지) 피고인이 항소한 사건과 피고인을 위하여 항소한 사건에 대하여는 원심판결의 형보다 무거운 형을 선고하지 못한다.
+1: 군사법원법 501조 12 불이익 변경의 금지제501조의12(불이익 변경의 금지) 피고인이 정식재판을 청구한 사건에 대하여는 약식명령의 형보다 무거운 형을 선고하지 못한다.
+2: 군사법원법 227조 2 피고인의 소송비용 부담 1항① 형을 선고할 때에는 피고인에게 소송비용의 전부 또는 일부를 부담하게 할 수 있다. 다만, 피고인이 경제적 사정으로 소송비용을 낼 수 없을 때에는 그러하지 아니하다.
+3: 군사법원법 489조  불이익 변경의 금지제489조(불이익 변경의 금지) 재심에서는 원판결의 형보다 무거운 형을 선고하지 못한다.
+4: 군사법원법 377조  유죄판결에 밝힐 이유 1항① 형을 선고할 때에는 판결이유에 범죄가 될 사실, 증거의 요지 및 법령의 적용을 밝혀야 한다.
+5: 군사법원법 505조  형 집행의 순서제505조(형 집행의 순서) 둘 이상의 형의 집행은 자격상실, 자격정지, 벌금, 과료 및 몰수 외에는 무거운 형을 먼저 집행한다. 다만, 군검사는 국방부장관 또는 소속 군 참모총장의 허가를 받아 무거운 형의 집행을 정지하고 다른 형의 집행을 할 수 있다. <개정 2016.1.6, 2021.9.24>
+6: 군사법원법 292조  둘 이상의 형과 시효기간제292조(둘 이상의 형과 시효기간) 둘 이상의 형을 병과(倂科)하거나 둘 이상의 형에서 하나를 과할 범죄에는 무거운 형에 따라 제291조를 적용한다.
+7: 군사법원법 393조  경합범 중 다시 형을 정하는 절차 1항① 「형법」 제36조, 제39조제3항 또는 제61조에 따라 형을 정할 경우에는 군검사는 그 범죄사실에 대한 최종판결을 한 군사법원에 청구하여야 한다. 다만, 「형법」 제61조에 따라 유예한 형을 선고할 때에는 제377조에 따라야 하고 선고유예를 해제하는 이유를 밝혀야 한다. <개정 2016.1.6>
+8: 군사법원법 227조 2 피고인의 소송비용 부담 2항② 피고인이 책임질 사유로 발생된 비용은 형을 선고하지 아니하는 경우에도 피고인에게 부담하게 할 수 있다.
+9: 군사법원법 325조  경미사건 등과 피고인의 불출석 3호3. 장기 3년 이하의 징역 또는 금고, 다액 500만원을 초과하는 벌금 또는 구류에 해당하는 사건에서 피고인이 불출석허가신청을 하였고 군사법원이 피고인이 출석하지 아니하여도 그의 권리 보호에 지장이 없다고 인정하여 불출석을 허가한 사건. 다만, 제329조에 따른 절차를 진행하거나 판결을 선고하는 공판기일에는 출석하여야 한다.
+Answer: 0
+
+Background: 갑은 을의 집에 몰래 침입하여 금품을 훔치던 중 을에게 발각되었습니다. 을이 금품을 되찾으려 하자, 갑은 을에게 폭력을 행사하여 탈출에 성공했습니다. 며칠 후, 또 다른 사건에서 병은 금품을 강도하는 과정에서 피해자 정에게 심각한 상해를 입혔습니다.
+Question: 폭력을 행사하여 상해를 입히면 어떤 처벌을 받게 되나요?
+Candidates:
+0: 군사법원법 382조  공소기각의 판결 6호6. 피해자가 명시한 의사에 반하여 공소를 제기할 수 없는 사건에 대하여 처벌을 희망하지 아니하는 의사 표시가 있거나 처벌을 희망하는 의사 표시가 철회되었을 때
+1: 아동학대범죄의 처벌 등에 관한 특례법 27조  아동보호사건의 처리 2항② 다음 각 호의 경우에는 제1항을 적용할 수 있다. <신설 2016.5.29> 1. 피해자의 고소가 있어야 공소를 제기할 수 있는 아동학대범죄에서 고소가 없거나 취소된 경우 2. 피해자의 명시적인 의사에 반하여 공소를 제기할 수 없는 아동학대범죄에서 피해자가 처벌을 희망하지 아니한다는 명시적 의사표시를 하였거나 처벌을 희망하는 의사표시를 철회한 경우
+2: 군사법원법 274조  고소의 취소 3항③ 피해자가 명시한 의사에 반하여 죄를 물을 수 없는 사건에서 처벌을 희망하는 의사표시의 철회에 관하여도 제1항과 제2항을 준용한다.
+3: 군사법원법 352조  피고인 등의 퇴정 1항① 재판장은 직권으로 또는 군검사, 피고인이나 변호인의 신청에 따라 피고인, 증인, 감정인 또는 통역인이 어떤 방청인의 면전에서 충분한 진술을 할 수 없다고 인정하면 그를 퇴정시킨 후 진술하게 할 수 있다. <개정 2016.1.6>
+4: 한부모가족지원법 25조 2 부정수급자에 대한 비용의 징수 1항① 거짓이나 그 밖의 부정한 방법으로 복지 급여를 받거나 타인으로 하여금 복지 급여를 받게 한 경우 복지 급여를 지급한 지원기관은 그 비용의 전부 또는 일부를 그 복지 급여를 받은 자 또는 복지 급여를 받게 한 자(이하 "부정수급자"라 한다)로부터 징수할 수 있다. <개정 2014.1.21>
+5: 마약류 관리에 관한 법률 40조  마약류 중독자의 치료보호 7항⑦ 보건복지부장관 또는 시ㆍ도지사는 마약류 사용자에 대하여 제1항에 따른 치료보호기관에서 마약류 중독 여부의 판별검사를 받게 하거나 마약류 중독자로 판명된 사람에 대하여 치료보호를 받게 할 수 있다. 이 경우 판별검사 기간은 1개월 이내로 하고, 치료보호 기간은 12개월 이내로 한다. <신설 2024.2.6>
+6: 마약류 관리에 관한 법률 40조  마약류 중독자의 치료보호 7항⑦ 보건복지부장관 또는 시ㆍ도지사는 마약류 사용자에 대하여 제1항에 따른 치료보호기관에서 마약류 중독 여부의 판별검사를 받게 하거나 마약류 중독자로 판명된 사람에 대하여 치료보호를 받게 할 수 있다. 이 경우 판별검사 기간은 1개월 이내로 하고, 치료보호 기간은 12개월 이내로 한다. <신설 2024.2.6>
+7: 형의 집행 및 수용자의 처우에 관한 법률 69조  직업능력개발훈련 2항② 소장은 수형자의 직업훈련을 위하여 필요하면 외부의 기관 또는 단체에서 훈련을 받게 할 수 있다.
+8: 군인연금법 19조  급여의 조정 1항① 퇴역연금을 받을 권리가 있는 사람이 본인의 퇴역연금 외에 퇴역유족연금을 함께 받게 된 경우에는 퇴역유족연금액의 2분의 1을 빼고 지급한다.
+9: 형법 337조  강도상해, 치상 제337조(강도상해, 치상) 강도가 사람을 상해하거나 상해에 이르게 한때에는 무기 또는 7년 이상의 징역에 처한다.
+Answer: 9
+
+Background: 갑은 을의 집에 몰래 침입하여 금품을 훔치던 중 을에게 발각되었습니다. 을이 금품을 되찾으려 하자, 갑은 을에게 폭력을 행사하여 탈출에 성공했습니다. 며칠 후, 또 다른 사건에서 병은 금품을 강도하는 과정에서 피해자 정에게 심각한 상해를 입혔습니다
+Question: 상해를 입히면 어떤 처벌을 받게되나요?
+Candidates:
+0: 군사법원법 382조  공소기각의 판결 6호6. 피해자가 명시한 의사에 반하여 공소를 제기할 수 없는 사건에 대하여 처벌을 희망하지 아니하는 의사 표시가 있거나 처벌을 희망하는 의사 표시가 철회되었을 때
+1: 형법 337조  강도상해, 치상  제337조(강도상해, 치상) 강도가 사람을 상해하거나 상해에 이르게 한때에는 무기 또는 7년 이상의 징역에 처한다. <개정 1995.12.29>
+2: 군사법원법 274조  고소의 취소 3항③ 피해자가 명시한 의사에 반하여 죄를 물을 수 없는 사건에서 처벌을 희망하는 의사표시의 철회에 관하여도 제1항과 제2항을 준용한다.
+3: 군사법원법 352조  피고인 등의 퇴정 1항① 재판장은 직권으로 또는 군검사, 피고인이나 변호인의 신청에 따라 피고인, 증인, 감정인 또는 통역인이 어떤 방청인의 면전에서 충분한 진술을 할 수 없다고 인정하면 그를 퇴정시킨 후 진술하게 할 수 있다. <개정 2016.1.6>
+4: 군사법원법 236조 3 진술거부권 등의 고지 1항① 군검사나 군사법경찰관은 피의자를 신문하기 전에 다음 각 호의 사항을 알려주어야 한다. <개정 2016.1.6> 1. 어떤 진술도 하지 아니하거나 각각의 질문에 대하여 진술하지 아니할 수 있다는 것 2. 진술하지 아니하더라도 불이익을 받지 아니한다는 것 3. 진술을 거부할 권리를 포기하고 한 진술은 법정에서 유죄의 증거로 사용될 수 있다는 것 4. 신문을 받을 때에는 변호인을 참여하게 하는 등 변호인의 도움을 받을 수 있다는 것
+5: 국토의 계획 및 이용에 관한 법률 42조  다른 법률에 따라 지정된 지역의 용도지역 지정 등의 의제 4항④ 제1항에 해당하는 구역ㆍ단지ㆍ지구 등(이하 이 항에서 "구역등"이라 한다)이 해제되는 경우(개발사업의 완료로 해제되는 경우는 제외한다) 이 법 또는 다른 법률에서 그 구역등이 어떤 용도지역에 해당되는지를 따로 정하고 있지 아니한 경우에는 이를 지정하기 이전의 용도지역으로 환원된 것으로 본다. 이 경우 지정권자는 용도지역이 환원된 사실을 대통령령으로 정하는 바에 따라 고시하고, 그 지역을 관할하는 특별시장ㆍ광역시장ㆍ특별자치시장ㆍ특별자치도지사ㆍ시장 또는 군수에게 통보하여야 한다. <개정 2011.4.14>
+6: 영유아보육법 48조  어린이집의 원장 또는 보육교사의 자격취소 1항①교육부장관은 어린이집의 원장 또는 보육교사가 다음 각 호의 어느 하나에 해당하면 그 자격을 취소할 수 있다. <개정 2008.2.29, 2010.1.18, 2011.6.7, 2011.8.4, 2013.8.13, 2015.5.18, 2020.12.29, 2023.12.26> 1. 거짓이나 그 밖의 부정한 방법으로 자격증을 취득한 경우 2. 자격 취득자가 업무 수행 중 그 자격과 관련하여 고의나 중대한 과실로 손해를 입히고 금고 이상의 형을 선고받은 경우 3. 「아동복지법」 제3조제7호의2에 따른 아동학대관련범죄로 처벌을 받은 경우 4. 제22조의2에 따른 명의대여 금지 등의 의무를 위반한 경우 5. 자격정지처분기간 종료 후 3년 이내에 자격정지처분에 해당하는 행위를 한 경우 6. 자격정지처분을 받고도 자격정지처분기간 이내에 자격증을 사용하여 자격 관련 업무를 수행한 경우 7. 자격정지처분을 3회 이상 받은 경우 8. 제46조제1항제4호에 해당하여 금고 이상의 형을 선고받은 경우
+7: 주택법 8조  주택건설사업의 등록말소 등 1항① 국토교통부장관은 등록사업자가 다음 각 호의 어느 하나에 해당하면 그 등록을 말소하거나 1년 이내의 기간을 정하여 영업의 정지를 명할 수 있다. 다만, 제1호 또는 제5호에 해당하는 경우에는 그 등록을 말소하여야 한다. <개정 2018.8.14, 2024.1.16> 1. 거짓이나 그 밖의 부정한 방법으로 등록한 경우 2. 제4조제2항에 따른 등록기준에 미달하게 된 경우. 다만, 「채무자 회생 및 파산에 관한 법률」에 따라 법원이 회생절차개시의 결정을 하고 그 절차가 진행 중이거나 일시적으로 등록기준에 미달하는 등 대통령령으로 정하는 경우는 예외로 한다. 3. 고의 또는 과실로 공사를 잘못 시공하여 공중(公衆)에게 위해(危害)를 끼치거나 입주자에게 재산상 손해를 입힌 경우 4. 제6조제1호부터 제4호까지 또는 제6호 중 어느 하나에 해당하게 된 경우. 다만, 법인의 임원 중 제6조제6호에 해당하는 사람이 있는 경우 6개월 이내에 그 임원을 다른 사람으로 임명한 경우에는 그러하지 아니하다. 5. 제90조제1항을 위반하여 등록증의 대여 등을 한 경우 5의2. 제90조제2항을 위반하여 등록증을 빌리거나 허락 없이 등록사업자의 성명 또는 상호로 이 법에서 정한 사업이나 업무를 수행 또는 시공한 경우 5의3. 제90조제4항을 위반하여 이 법에서 정한 사업이나 업무를 수행 또는 시공하기 위하여 같은 조 제2항의 행위를 교사하거나 방조한 경우 6. 다음 각 목의 어느 하나에 해당하는 경우 7. 「택지개발촉진법」 제19조의2제1항을 위반하여 택지를 전매(轉賣)한 경우 8. 「표시ㆍ광고의 공정화에 관한 법률」 제17조제1호에 따른 처벌을 받은 경우 9. 「약관의 규제에 관한 법률」 제34조제2항에 따른 처분을 받은 경우 10. 그 밖에 이 법 또는 이 법에 따른 명령이나 처분을 위반한 경우
+8: 식품위생법 47조  모범업소의 지정 등 4항④ 제1항 및 제3항에 따른 모범업소의 지정 및 그 취소에 관한 사항은 총리령으로 정한다. <개정 2010.1.18, 2013.3.23, 2024.1.2>
+9: 식품위생법 47조 2 식품접객업소의 위생등급 지정 등 5항⑤ 위생등급의 유효기간은 위생등급을 지정한 날부터 2년으로 한다. 다만, 총리령으로 정하는 바에 따라 그 기간을 연장할 수 있다.
+Answer: 1
+
+Background: 갑(정부기관)은 새로운 환경 규제를 설정하면서 일부 기업들에게 폐기물 배출량을 줄이라는 명령을 내렸다. 을(한 기업)은 이 명령이 지나치게 엄격하며 자사의 영업을 방해한다고 주장하며, 명령의 기준이 불명확하다고 법원에 소송을 제기했다. 을은 행정청이 기준을 설정하거나 이를 공표하지 않아 명령이 불공정하다고 주장했다.
+Question: 행정청이 기업에 내린 환경 규제는 언제 법원이 취소할 수 있나요?
+Candidates:
+0: 개인정보 보호법 39조 5 비밀유지명령의 취소 1항① 비밀유지명령을 신청한 자 또는 비밀유지명령을 받은 자는 제39조의4제2항 각 호의 사유에 부합하지 아니하는 사실이나 사정이 있는 경우 소송기록을 보관하고 있는 법원(소송기록을 보관하고 있는 법원이 없는 경우에는 비밀유지명령을 내린 법원을 말한다)에 비밀유지명령의 취소를 신청할 수 있다.
+1: 지방세특례제한법 115조 3 근로소득을 증대시킨 기업에 대한 세액공제제115조의3(근로소득을 증대시킨 기업에 대한 세액공제)
+2: 지방세특례제한법 115조 4 청년고용을 증대시킨 기업에 대한 세액공제제115조의4(청년고용을 증대시킨 기업에 대한 세액공제)
+3: 행정소송법 27조  재량처분의 취소 제27조(재량처분의 취소) 행정청의 재량에 속하는 처분이라도 재량권의 한계를 넘거나 그 남용이 있는 때에는 법원은 이를 취소할 수 있다.
+4: 국가균형발전 특별법 15조  지역문화ㆍ관광의 육성 및 환경 보전제15조(지역문화ㆍ관광의 육성 및 환경 보전) 국가 및 지방자치단체는 지역의 문화ㆍ관광 육성 및 환경 보전을 위하여 다음 각 호의 사항에 관한 시책을 추진하여야 한다. <개정 2014.1.7, 2018.3.20>
+5: 국가균형발전 특별법 15조  지역문화ㆍ관광의 육성 및 환경 보전 7호7. 그 밖에 지역의 문화ㆍ관광 육성 및 환경 보전을 위하여 필요한 사항
+6: 주택법 39조  공동주택성능등급의 표시 3호3. 조경ㆍ일조확보율ㆍ실내공기질ㆍ에너지절약 등 환경 관련 등급
+7: 공무원범죄에 관한 몰수 특례법 14조  참가 절차 5항⑤ 법원이 참가를 허가한 경우 몰수하여야 할 재산 또는 몰수하여야 할 재산상에 존재하는 지상권ㆍ저당권 또는 그 밖의 권리가 참가가 허가된 자(이하 "참가인"이라 한다)에게 귀속하지 아니함이 명백하게 되었을 때에는 참가를 허가한 재판을 취소하여야 하며, 몰수가 불가능하거나 불필요하다는 검사 의견이 타당하다고 인정할 때에는 참가를 허가한 재판을 취소할 수 있다.
+8: 신용보증기금법 2조  정의 9호9. "보증연계투자"란 기금이 제23조의4제1항에 따라 기업에 투자하는 것을 말한다.
+9: 신용보증기금법 23조 4 보증연계투자 3항③ 기금이 같은 기업에 대하여 보증연계투자할 수 있는 한도는 대통령령으로 정한다.
+Answer: 3
+
+<Query>
+Background: $background
+Question: $question
+Candidates: 
+$candidates
+Answer: """)
+
+
+
+
+def rerank2(questions, candidates, model, context_list):
+    reranked_results = []
+
+    for q, sub_query_candidates in zip(questions, candidates):
+        reranked_per_sub = []
+
+        for cand_indices in sub_query_candidates:
+            pair_batch = [(q, context_list[c]) for c in cand_indices]
+
+            # ② 모델로 점수 예측
+            scores = model.predict(pair_batch,
+                                   batch_size=50,
+                                   show_progress_bar=False)
+
+            scored_with_contexts = sorted(
+                zip(scores, (ctx for _, ctx in pair_batch)),
+                key=lambda x: x[0],
+                reverse=True
+            )
+
+            ordered_contexts = [ctx for _, ctx in scored_with_contexts]
+
+            reranked_per_sub.append(ordered_contexts)
+
+        reranked_results.append(reranked_per_sub)
+
+    return reranked_results
+
+    
+    
+
+
+class LlmGenerator:
+    def __init__(self, model_name, dtype, trust_remote_code, tensor_parallel_size,
+                 temperature, top_p, max_tokens):
+        self.sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            logprobs=1,
+            seed=0
+        )
+        self.llm = LLM(
+            model=model_name,
+            dtype=dtype,
+            trust_remote_code=trust_remote_code,
+            tensor_parallel_size=tensor_parallel_size,
+            max_model_len=15000
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer.padding_side = "right"
+        
+if __name__ == '__main__':
+    input_file = "input-path"
+    data_list=[]
+    with open(input_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            data_list.append(json.loads(line))
+        
+    collections_file = "statute-path"
+    raw_items = []
+    with open(collections_file, encoding='utf-8') as f:
+        for line in f:
+            raw_items.append(json.loads(line))
+
+    context_list = [item['hierarchy'] + item['content'] for item in raw_items]
+    corpus_tokens = bm25s.tokenize(context_list, stopwords="en", show_progress=False)
+    
+        
+
+        
+    global_retriever = bm25s.BM25()
+    global_retriever.index(corpus_tokens, show_progress=False)
+    
+    print("Start model loading")
+    model = CrossEncoder('dragonkue/bge-reranker-v2-m3-ko', default_activation_function=torch.nn.Sigmoid(), device='cuda')
+    print("Complete model loading")
+    
+    # Retrieve using BM25
+    predictions_top1 = []
+    gold_answers=[]
+    questions=[]
+    candidates=[]
+    backgrounds=[]
+    
+    parametric_provisions = []
+    
+    for item in data_list:
+        temp = item['subs']
+        parametric_provisions.append(temp)
+        q = item['question']
+        backgrounds.append(item['background'])
+        gold=[]
+        for t in item['contexts']:
+            gold.append(t['hierarchy']+t['content'])     
+        temp_candidates = []
+        temp_prediction = []
+        
+        for query in temp:
+            query_token = bm25s.tokenize([query], show_progress=False)
+            local_idxs, _ = global_retriever.retrieve(query_token, k=100, show_progress=False)
+            gl_idxs = local_idxs[0]
+            
+            temp_candidates.append(gl_idxs)
+            temp_prediction.append(context_list[gl_idxs[0]])
+            
+        predictions_top1.append(temp_prediction)
+        gold_answers.append(gold)
+        questions.append(q)
+        candidates.append(temp_candidates)
+        
+    
+    reranked = rerank2(questions,candidates,model,context_list)
+    reranked_top1 = [
+    [sub[0] if sub else ""               # sub‑query가 비어 있으면 빈 문자열
+     for sub in per_question]            # 각 question 안의 sub‑query 루프
+    for per_question in reranked         # question 루프
+    ]
+    
+    model.to('cpu')
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    
+    llm_gen = LlmGenerator(
+        model_name="model name", #model name
+        dtype="auto",
+        trust_remote_code=True,
+        tensor_parallel_size=1,
+        temperature=0.0,
+        top_p=0.9,
+        max_tokens=2048
+    )
+    
+    gen_prompts = []
+    counts=[]
+    for can, q, b in zip(reranked,questions,backgrounds):
+        for item in can:
+            top_10 = item[:10]
+            top_10_str = [f"{i}: {s}" for i, s in enumerate(top_10)]
+            cand_str = "\n".join(top_10_str)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": instruction_prompt.substitute(background=b, question=q, candidates=cand_str)}  
+            ]
+            inp = llm_gen.tokenizer.apply_chat_template(
+                messages, tokenize=True, add_generation_prompt=True, return_tensors="pt", enable_thinking=False
+            )
+            prompt = llm_gen.tokenizer.decode(inp[0], skip_special_tokens=False)
+            gen_prompts.append(prompt)
+        counts.append(len(can))
+    
+    results = llm_gen.llm.generate(gen_prompts, llm_gen.sampling_params)
+    
+    selected=[]
+    idx = 0
+    
+    for sub_cnt,re in zip(counts,reranked):                    # 각 질문마다
+        preds_per_q = []
+
+        for i in range(sub_cnt):              # 그 질문의 sub‑query 수만큼
+            output = results[idx].outputs[0]
+            answer = output.text.split("Answer:")[-1].strip()
+            answer = answer.split("</think>")[0].strip()
+            candidates = re[i]
+            # 원하면 숫자(0~9)는 int 로, 아니면 0 으로
+            if answer.isdigit() and len(answer) == 1:
+                answer = int(answer)
+            else:
+                answer = 0
+
+            preds_per_q.append(candidates[answer])
+            idx += 1                          # 다음 결과로 이동
+
+        selected.append(preds_per_q)
+         
+    
+    output_path = "output-path"
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for bg, s, golds, question, pp in zip(backgrounds, selected,gold_answers,questions,parametric_provisions):
+            output = {
+                "background": bg,
+                "question": question,
+                "parametric_provisions": pp,
+                "selected_provisions": s,
+                "answers": golds
+            }
+            json.dump(output, f, ensure_ascii=False)
+            f.write('\n')
+    print(f"file saved at {output_path}")                
+
