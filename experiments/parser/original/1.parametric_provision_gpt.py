@@ -171,7 +171,18 @@ def main(args):
     output_path = "output-path"
     with open(output_path, 'w',encoding='utf-8') as fw:
         for item, (result, tok) in zip(data_list, results):
-            item["subs"] = result
+            # Parse the result string into a list
+            block = extract_first_list(result)
+            if block is None:
+                subs = []
+                print(f"No list found in result: {result}")
+            else:
+                subs = parse_list_block(block)
+                subs = escape_quotes(subs)
+                if not isinstance(subs, list):
+                    subs = [subs]
+            
+            item["subs"] = subs
             fw.write(json.dumps(item, ensure_ascii=False) + "\n")
     
     print(f"Total LLM Call: {len(prompts_list)}")
