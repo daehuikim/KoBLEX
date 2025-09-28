@@ -1,5 +1,6 @@
 import json
 import os
+import argparse
 from string import Template
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
@@ -126,29 +127,45 @@ def process_completions(completions):
     return answers
 
 if __name__ == '__main__':
-    input_file = "input-path"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", type=str, required=True,
+                        help="Input file path")
+    parser.add_argument("--output_path", type=str, required=True,
+                        help="Output file path")
+    parser.add_argument("--model_name", type=str, required=True,
+                        help="Model name to use")
+    parser.add_argument("--tensor_parallel_size", type=int, default=2,
+                        help="Tensor parallel size")
+    parser.add_argument("--temperature", type=float, default=0.0,
+                        help="Temperature for sampling")
+    parser.add_argument("--top_p", type=float, default=0.9,
+                        help="Top-p for sampling")
+    parser.add_argument("--max_tokens", type=int, default=4000,
+                        help="Maximum tokens to generate")
+    
+    args = parser.parse_args()
+    
     data_list=[]
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(args.input_path, 'r', encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
     
     prompts = create_prompts(data_list)
     
     llm_gen = LlmGenerator(
-        model_name="model name",
+        model_name=args.model_name,
         dtype="auto",
         trust_remote_code=True,
-        tensor_parallel_size=2,
-        temperature=0.0,
-        top_p=0.9,
-        max_tokens=4000
+        tensor_parallel_size=args.tensor_parallel_size,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.max_tokens
     )
 
     outputs = llm_gen.generate(prompts)
     answers = process_completions(outputs)
     
-    out_file = "output-path"
-    with open(out_file, 'w', encoding='utf-8') as fw:
+    with open(args.output_path, 'w', encoding='utf-8') as fw:
         for item, provisions, answer in zip(data_list, [item.get('selected_provisions', []) for item in data_list], answers):
             record = {
                 "background": item['background'],
@@ -157,4 +174,4 @@ if __name__ == '__main__':
                 "provisions": provisions
             }
             fw.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"Saved detailed answers to {out_file}")
+    print(f"Saved detailed answers to {args.output_path}")
