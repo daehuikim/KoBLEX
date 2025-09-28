@@ -95,8 +95,8 @@ def quoted_items(text: str) -> list[str]:
                 qchar = ch
     return items
 
-def create_prompts(data_list):
-    with open('prompt_path','r',encoding='utf-8') as f:
+def create_prompts(data_list, prompt_path):
+    with open(prompt_path,'r',encoding='utf-8') as f:
         prompt_str = f.read()
     
     gc_prompt = Template(prompt_str)
@@ -124,9 +124,8 @@ async def get_completion(datapoint, model_name, session, semaphore, headers):
             response_json = await resp.json()
 
             pred = response_json["choices"][0]['message']["content"]
-            usage_container = int(response_json["usage"]["completion_tokens"])
             pred = pred.strip()
-            return (pred, usage_container)
+            return pred
 
 async def get_completion_list(datapoints, max_parallel_calls, model_name, headers):
     semaphore = asyncio.Semaphore(value=max_parallel_calls)
@@ -145,13 +144,12 @@ def main(args):
 
     encoding = tiktoken.get_encoding("cl100k_base")
     
-    input_file = "input-path"
     data_list=[]
-    with open(input_file,'r',encoding='utf-8') as f:
+    with open(args.input_path,'r',encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
     
-    prompts_list = create_prompts(data_list)
+    prompts_list = create_prompts(data_list, args.prompt_path)
     
     token_count = 0
     for data in prompts_list:
@@ -168,13 +166,12 @@ def main(args):
         for r, _ in results:
             f.write(r + "\n")
     
-    output_path = "output-path"
-    with open(output_path, 'w',encoding='utf-8') as fw:
+    with open(args.output_path, 'w',encoding='utf-8') as fw:
         for item, (result, tok) in zip(data_list, results):
             # Parse the result string into a list
             block = extract_first_list(result)
             if block is None:
-                subs = []
+                subs = [item["question"]]  # Use question as fallback
                 print(f"No list found in result: {result}")
             else:
                 subs = parse_list_block(block)
@@ -186,10 +183,16 @@ def main(args):
             fw.write(json.dumps(item, ensure_ascii=False) + "\n")
     
     print(f"Total LLM Call: {len(prompts_list)}")
-    print(f"Wrote {len(data_list)} records with `subs` to {output_path}")
+    print(f"Wrote {len(data_list)} records with `subs` to {args.output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", type=str, required=True,
+                        help="Input file path")
+    parser.add_argument("--output_path", type=str, required=True,
+                        help="Output file path")
+    parser.add_argument("--prompt_path", type=str, required=True,
+                        help="Prompt template file path")
     parser.add_argument("--model_name", type=str, 
                         help="Model to be used for generating context", default="gpt-4o")
     parser.add_argument("--raw_output_path", type=str,

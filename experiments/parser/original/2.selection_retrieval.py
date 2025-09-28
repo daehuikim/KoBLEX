@@ -1,5 +1,6 @@
 import json
 import os
+import argparse
 from string import Template
 import bm25s
 import numpy as np
@@ -9,6 +10,7 @@ import re,gc
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 from string import Template
+from tqdm import tqdm
 
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
@@ -127,15 +129,15 @@ Answer: """)
 def rerank2(questions, candidates, model, context_list):
     reranked_results = []
 
-    for q, sub_query_candidates in zip(questions, candidates):
+    for q, sub_query_candidates in tqdm(zip(questions, candidates), desc="Reranking questions", total=len(questions)):
         reranked_per_sub = []
 
-        for cand_indices in sub_query_candidates:
+        for cand_indices in tqdm(sub_query_candidates, desc="Reranking candidates", leave=False):
             pair_batch = [(q, context_list[c]) for c in cand_indices]
 
             # ② 모델로 점수 예측
             scores = model.predict(pair_batch,
-                                   batch_size=50,
+                                   batch_size=200,  # 50 -> 200으로 증가
                                    show_progress_bar=False)
 
             scored_with_contexts = sorted(
@@ -177,15 +179,33 @@ class LlmGenerator:
         self.tokenizer.padding_side = "right"
         
 if __name__ == '__main__':
-    input_file = "input-path"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", type=str, required=True,
+                        help="Input file path")
+    parser.add_argument("--output_path", type=str, required=True,
+                        help="Output file path")
+    parser.add_argument("--statute_path", type=str, required=True,
+                        help="Statute collection file path")
+    parser.add_argument("--model_name", type=str, required=True,
+                        help="Model name to use")
+    parser.add_argument("--tensor_parallel_size", type=int, default=1,
+                        help="Tensor parallel size")
+    parser.add_argument("--temperature", type=float, default=0.0,
+                        help="Temperature for sampling")
+    parser.add_argument("--top_p", type=float, default=0.9,
+                        help="Top-p for sampling")
+    parser.add_argument("--max_tokens", type=int, default=2048,
+                        help="Maximum tokens to generate")
+    
+    args = parser.parse_args()
+    
     data_list=[]
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(args.input_path, 'r', encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
         
-    collections_file = "statute-path"
     raw_items = []
-    with open(collections_file, encoding='utf-8') as f:
+    with open(args.statute_path, encoding='utf-8') as f:
         for line in f:
             raw_items.append(json.loads(line))
 
@@ -200,6 +220,8 @@ if __name__ == '__main__':
     
     print("Start model loading")
     model = CrossEncoder('dragonkue/bge-reranker-v2-m3-ko', default_activation_function=torch.nn.Sigmoid(), device='cuda')
+    model.eval()  # 평가 모드로 설정
+    torch.cuda.empty_cache()  # GPU 메모리 정리
     print("Complete model loading")
     
     # Retrieve using BM25
@@ -211,7 +233,8 @@ if __name__ == '__main__':
     
     parametric_provisions = []
     
-    for item in data_list:
+    print("Starting BM25 retrieval...")
+    for item in tqdm(data_list, desc="Processing items"):
         temp = item['subs']
         parametric_provisions.append(temp)
         q = item['question']
@@ -222,7 +245,7 @@ if __name__ == '__main__':
         temp_candidates = []
         temp_prediction = []
         
-        for query in temp:
+        for query in tqdm(temp, desc=f"Retrieving for question {len(questions)+1}", leave=False):
             query_token = bm25s.tokenize([query], show_progress=False)
             local_idxs, _ = global_retriever.retrieve(query_token, k=100, show_progress=False)
             gl_idxs = local_idxs[0]
@@ -236,6 +259,7 @@ if __name__ == '__main__':
         candidates.append(temp_candidates)
         
     
+    print("Starting reranking...")
     reranked = rerank2(questions,candidates,model,context_list)
     reranked_top1 = [
     [sub[0] if sub else ""               # sub‑query가 비어 있으면 빈 문자열
@@ -249,20 +273,21 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
     
     llm_gen = LlmGenerator(
-        model_name="model name", #model name
+        model_name=args.model_name,
         dtype="auto",
         trust_remote_code=True,
-        tensor_parallel_size=1,
-        temperature=0.0,
-        top_p=0.9,
-        max_tokens=2048
+        tensor_parallel_size=args.tensor_parallel_size,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.max_tokens
     )
     
+    print("Creating prompts...")
     gen_prompts = []
     counts=[]
-    for can, q, b in zip(reranked,questions,backgrounds):
+    for can, q, b in tqdm(zip(reranked,questions,backgrounds), desc="Creating prompts"):
         for item in can:
-            top_10 = item[:10]
+            top_10 = item[:10]  # 상위 10개만 사용
             top_10_str = [f"{i}: {s}" for i, s in enumerate(top_10)]
             cand_str = "\n".join(top_10_str)
             messages = [
@@ -276,12 +301,14 @@ if __name__ == '__main__':
             gen_prompts.append(prompt)
         counts.append(len(can))
     
+    print("Generating with LLM...")
     results = llm_gen.llm.generate(gen_prompts, llm_gen.sampling_params)
     
+    print("Processing results...")
     selected=[]
     idx = 0
     
-    for sub_cnt,re in zip(counts,reranked):                    # 각 질문마다
+    for sub_cnt,re in tqdm(zip(counts,reranked), desc="Processing results"):                    # 각 질문마다
         preds_per_q = []
 
         for i in range(sub_cnt):              # 그 질문의 sub‑query 수만큼
@@ -301,9 +328,9 @@ if __name__ == '__main__':
         selected.append(preds_per_q)
          
     
-    output_path = "output-path"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        for bg, s, golds, question, pp in zip(backgrounds, selected,gold_answers,questions,parametric_provisions):
+    print("Saving results...")
+    with open(args.output_path, 'w', encoding='utf-8') as f:
+        for bg, s, golds, question, pp in tqdm(zip(backgrounds, selected,gold_answers,questions,parametric_provisions), desc="Saving results"):
             output = {
                 "background": bg,
                 "question": question,
@@ -313,5 +340,5 @@ if __name__ == '__main__':
             }
             json.dump(output, f, ensure_ascii=False)
             f.write('\n')
-    print(f"file saved at {output_path}")                
+    print(f"file saved at {args.output_path}")                
 

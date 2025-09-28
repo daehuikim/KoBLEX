@@ -2,6 +2,7 @@ import json
 import bm25s
 import Stemmer
 import os
+import argparse
 from collections import deque
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
@@ -135,21 +136,38 @@ def quoted_items(text: str) -> list[str]:
                 qchar = ch
     return items
     
-if __name__ == '__main__':    
-    input_file = "input-path"
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", type=str, required=True,
+                        help="Input file path")
+    parser.add_argument("--output_path", type=str, required=True,
+                        help="Output file path")
+    parser.add_argument("--model_name", type=str, required=True,
+                        help="Model name to use")
+    parser.add_argument("--tensor_parallel_size", type=int, default=1,
+                        help="Tensor parallel size")
+    parser.add_argument("--temperature", type=float, default=0.0,
+                        help="Temperature for sampling")
+    parser.add_argument("--top_p", type=float, default=0.9,
+                        help="Top-p for sampling")
+    parser.add_argument("--max_tokens", type=int, default=4000,
+                        help="Maximum tokens to generate")
+    
+    args = parser.parse_args()
+    
     data_list=[]
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(args.input_path, 'r', encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
     
     llm_gen = LlmGenerator(
-        model_name="model name", # You can change model name
+        model_name=args.model_name,
         dtype="auto",
         trust_remote_code=True,
-        tensor_parallel_size=1,
-        temperature=0.0,
-        top_p=0.9,
-        max_tokens=4000
+        tensor_parallel_size=args.tensor_parallel_size,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.max_tokens
     )
             
     all_prompts = []
@@ -171,11 +189,11 @@ if __name__ == '__main__':
     completions = llm_gen.generate(all_prompts)
     
     results = []
-    for out in completions:
+    for i, out in enumerate(completions):
         raw = out.outputs[0].text
         block = extract_first_list(raw)
         if block is None:
-            results.append([])
+            results.append([data_list[i]["question"]])  # Use question as fallback
             print(raw)
             continue
         
@@ -186,12 +204,11 @@ if __name__ == '__main__':
         results.append(subs)
 
     
-    output_path = "output-path"
-    with open(output_path, "w", encoding="utf-8") as fout:
+    with open(args.output_path, "w", encoding="utf-8") as fout:
         for item,result in zip(data_list,results):
             item["subs"] = result
             fout.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    print(f"Wrote {len(data_list)} records with `subs` to {output_path}")
+    print(f"Wrote {len(data_list)} records with `subs` to {args.output_path}")
     
     

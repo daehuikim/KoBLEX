@@ -46,10 +46,9 @@ def extract_law_name_q(s):
     raw = m.group(1).strip()
     return normalize_law(raw)
 
-def retrieve_law():
-    collections_file = "statute-path"
+def retrieve_law(statute_path, input_path):
     raw_items = []
-    with open(collections_file, encoding='utf-8') as f:
+    with open(statute_path, encoding='utf-8') as f:
         for line in f:
             raw_items.append(json.loads(line))
 
@@ -85,9 +84,8 @@ def retrieve_law():
     global_retriever = bm25s.BM25()
     global_retriever.index(corpus_tokens, show_progress=False)
     
-    input_file = "input-path"
     data_list=[]
-    with open(input_file,'r',encoding='utf-8') as f:
+    with open(input_path,'r',encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
     
@@ -125,10 +123,9 @@ def retrieve_law():
         candidates.append(temp_candidates)    
     return predictions_top1, candidates, gold_answers, questions, origins, backgrounds
 
-def rerank2(questions, candidates):
-    collections_file = "statute-path"
+def rerank2(questions, candidates, statute_path):
     raw_items = []
-    with open(collections_file, encoding='utf-8') as f:
+    with open(statute_path, encoding='utf-8') as f:
         for line in f:
             raw_items.append(json.loads(line))
 
@@ -156,12 +153,12 @@ def rerank2(questions, candidates):
 
     return reranked_results
 
-def create_prompts(data_list):
-    with open('prompt-path','r',encoding='utf-8') as f:
+def create_prompts(data_list, prompt_path, statute_path):
+    with open(prompt_path,'r',encoding='utf-8') as f:
         prompt_str = f.read()
         
-    retrieval_only, candidates, gold_answers, questions, origins, backgrounds = retrieve_law()
-    reranked = rerank2([item['question'] for item in data_list], candidates)
+    retrieval_only, candidates, gold_answers, questions, origins, backgrounds = retrieve_law(statute_path, "dummy")
+    reranked = rerank2([item['question'] for item in data_list], candidates, statute_path)
     
     pick_prompt = Template(prompt_str)
     prompts = []
@@ -194,9 +191,8 @@ async def get_completion(datapoint, model_name, session, semaphore, headers):
             response_json = await resp.json()
 
             pred = response_json["choices"][0]['message']["content"]
-            usage_container = int(response_json["usage"]["completion_tokens"])
             pred = pred.strip()
-            return (pred, usage_container)
+            return pred
 
 async def get_completion_list(datapoints, max_parallel_calls, model_name, headers):
     semaphore = asyncio.Semaphore(value=max_parallel_calls)
@@ -215,13 +211,12 @@ def main(args):
 
     encoding = tiktoken.get_encoding("cl100k_base")
     
-    input_file = "input-path"
     data_list=[]
-    with open(input_file,'r',encoding='utf-8') as f:
+    with open(args.input_path,'r',encoding='utf-8') as f:
         for line in f:
             data_list.append(json.loads(line))
     
-    reranked, prompts_list, counts, gold_answers, questions, origins, backgrounds = create_prompts(data_list)
+    reranked, prompts_list, counts, gold_answers, questions, origins, backgrounds = create_prompts(data_list, args.prompt_path, args.statute_path)
     
     token_count = 0
     for data in prompts_list:
@@ -255,8 +250,7 @@ def main(args):
             idx += 1                          
         top_10_predictions.append(preds_per_q)
     
-    output_path = "output-path"
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(args.output_path, 'w', encoding='utf-8') as f:
         for bg, s, golds, question, pp in zip(backgrounds, top_10_predictions, gold_answers, questions, origins):
             output = {
                 "background": bg,
@@ -269,10 +263,18 @@ def main(args):
             f.write('\n')
             
     print(f"Total LLM Call: {len(prompts_list)}")
-    print(f"file saved at {output_path}")
+    print(f"file saved at {args.output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", type=str, required=True,
+                        help="Input file path")
+    parser.add_argument("--output_path", type=str, required=True,
+                        help="Output file path")
+    parser.add_argument("--statute_path", type=str, required=True,
+                        help="Statute collection file path")
+    parser.add_argument("--prompt_path", type=str, required=True,
+                        help="Prompt template file path")
     parser.add_argument("--model_name", type=str, 
                         help="Model to be used for generating context", default="gpt-4o")
     parser.add_argument("--raw_output_path", type=str,
